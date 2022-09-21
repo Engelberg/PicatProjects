@@ -1,0 +1,121 @@
+import util, sat.
+
+main => time(goal).
+
+goal =>
+    % Puzzle = {{_,7,_,_,9,_,_,_,_,_},
+    %           {_,_,4,_,_,_,_,_,4,_},
+    %           {_,_,_,_,_,_,_,_,_,6},
+    %           {_,_,_,_,_,_,_,_,_,_},
+    %           {_,_,_,_,_,_,_,_,_,_},
+    %           {_,_,_,_,_,_,_,_,_,_},
+    %           {_,_,_,_,_,_,_,_,_,_},
+    %           {6,_,_,_,_,_,_,_,_,_},
+    %           {_,3,_,_,_,_,_,2,_,_},
+    %           {_,_,_,_,_,3,_,_,2,_}},
+    Puzzle = {{_,_,_,_,5,_,_,_,3,_,_,_,4,_,_,5,_},
+              {_,3,_,_,_,_,_,2,_,_,_,_,_,_,_,_,_},
+              {2,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_},
+              {_,_,_,_,_,_,_,_,_,_,_,_,_,3,_,_,2},
+              {_,_,_,_,_,_,_,4,_,_,_,_,_,_,_,4,_},
+              {_,_,_,_,_,_,_,_,4,_,_,_,_,_,_,_,_},
+              {_,_,_,_,_,_,_,_,_,_,_,_,2,_,_,_,_},
+              {_,7,_,6,_,_,7,_,_,_,_,_,_,_,_,_,_},
+              {1,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,4},
+              {_,_,_,_,_,_,_,_,_,_,5,_,_,6,_,2,_},
+              {_,_,_,_,7,_,_,_,_,_,_,_,_,_,_,_,_},
+              {_,_,_,_,_,_,_,_,3,_,_,_,_,_,_,_,_},
+              {_,2,_,_,_,_,_,_,_,4,_,_,_,_,_,_,_},
+              {1,_,_,4,_,_,_,_,_,_,_,_,_,_,_,_,_},
+              {_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,2},
+              {_,_,_,_,_,_,_,_,_,3,_,_,_,_,_,7,_},
+              {_,1,_,_,2,_,_,_,7,_,_,_,2,_,_,_,_}},
+    givens(Puzzle,Givens,N),
+    constrain(Givens,N,Colors),
+    print_tank(Colors,N).
+
+print_tank(Colors,N) =>
+    foreach(I in 1..N)
+        foreach(J in 1..N)
+            print(cond(Colors[I,J]==1,"*","."))
+        end,
+        nl
+    end,
+    nl.
+
+givens(Puzzle,Givens,N) =>
+    % Puzzle is the input, a 2D NxN array with some numbers
+    % Givens is an output, a map from {Row,Col} pairs to the numbers at those locations
+    % N is an output, computed from Puzzle, so we don't need to keep recomputing its dimensions
+    Givens = new_map(),
+    N = length(Puzzle),
+    foreach (Row in 1..N, Col in 1..N)
+        if nonvar(Puzzle[Row,Col]) then
+            Givens.put({Row,Col},Puzzle[Row,Col])
+        end
+    end.
+
+% neighbors takes Row, Col, and N as inputs, and binds Neighbors
+% to a list of the neighbors to the right and down (provided they are in bounds)
+neighbors(Row,Col,N,Neighbors) =>
+    Candidates = [{Row,Col+1},{Row+1,Col}],
+    Neighbors = [{X,Y} : {X,Y} in Candidates, X<=N, Y<=N].
+
+constrain(Givens,N,Colors) =>
+    % Givens is an input, a map from {Row,Col} pairs to numeric values of how many white cells
+    % are connected to that coordinate.
+    % N is an input, the size of the puzzle grid.
+    % Colors is an output, and will contain an NxN Boolean array as to whether the cells
+    % are shaded or not, 1 indicates a black cell, 0 indicates a white cell.
+
+    % First we need to build an array of the {Row,Col} pairs with given values in the puzzle
+    % This array of given {Row,Col} pairs is called GivenCells
+    % This gives us a unique number from 1 to NumGivens to identify each of the given coordinates
+    GivenCells = {X : X in keys(Givens)},
+    NumGivens = length(GivenCells),
+
+    % Regions stores an NxN grid of numbers indicating what "region" the cell belongs to.
+    % If Region[Row,Col] is I where I is in 1..NumGivens, then {Row,Col} is connected
+    % to the Ith GivenCell.
+    % If Region[Row,Col] is N+1, then {Row,Col} is black.
+
+    Region = new_array(N,N),
+    Region :: 1..NumGivens+1,
+
+    % Cells[I] is an NxN Boolean array where a cell's value is true iff Region[Row,Col] = I
+    % This Boolean view of which cells have a given region number will allow
+    % us to easily apply the scc_grid constraint.
+
+    Cells = new_array(NumGivens+1,N,N),
+    Cells :: 0..1,
+
+    foreach (R in 1..NumGivens+1, Row in 1..N, Col in 1..N)
+        Cells[R,Row,Col] #<=> (Region[Row,Col] #= R)
+    end,
+
+    % All given cells must be white.
+    % The number stored in Givens map for {Row,Col} is the number of white cells connected to {Row,Col}
+    % Every white cell must be connected to exactly one of the puzzle's given numbered cells, 
+    % and the black cells must be all one connected group. 
+    % So each layer must satisfy the scc_grid constraint.    
+    foreach (R in 1..NumGivens)
+        {Row,Col} = GivenCells[R],
+        Region[Row,Col] = R,
+        scc_grid(Cells[R],Givens.get({Row,Col}))
+    end,
+    scc_grid(Cells[NumGivens+1]),
+
+    % No two touching cells from different white regions
+    foreach (Row in 1..N, Col in 1..N, neighbors(Row,Col,N,Neighbors), {NeighX,NeighY} in Neighbors)
+        Cells[NumGivens+1,Row,Col] #\/ Cells[NumGivens+1,NeighX,NeighY] #\/
+            Region[Row,Col] #= Region[NeighX,NeighY]
+    end,
+
+    % No 2x2 area of black cells
+    foreach (Row in 1..N-1, Col in 1..N-1)
+        #~Cells[NumGivens+1,Row,Col] #\/ #~Cells[NumGivens+1,Row+1,Col] #\/
+        #~Cells[NumGivens+1,Row,Col+1] #\/ #~Cells[NumGivens+1,Row+1,Col+1]
+    end,
+    solve(Cells),
+
+    Colors = Cells[NumGivens+1].
